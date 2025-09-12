@@ -391,7 +391,7 @@ def find_updates(search, all_updates=True, sort=None, sort_reverse=False, data=N
         print("Exception occured in main function while fetching updates from Microsoft Catalogue: %s" % str(e))
         return []
 
-def find_microsoft_catelogue_updates(serach):
+def find_microsoft_catelogue_updates(search):
     try:
         updates = {
         "updates": []
