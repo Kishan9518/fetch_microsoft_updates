@@ -17,6 +17,36 @@ A comprehensive tool for downloading, storing, and managing a database of Window
 - Export patch information to JSON format
 - Support for both Microsoft Update Catalog and Download Center
 
+## 🚀 Automated Database Updates
+
+This repository includes an **automated CI/CD pipeline** that maintains an up-to-date Windows patches database:
+
+- **Daily Updates**: Automatically fetches and commits the latest Windows patches
+- **Pre-built Database**: Ready-to-use `windows_patches.db` file in the repository
+- **Weekly Releases**: Database releases for easy download and integration
+- **Zero Setup**: Just clone and use the pre-populated database
+
+### Using the Pre-built Database
+
+```bash
+# Clone and use immediately
+git clone https://github.com/Kishan9518/fetch_microsoft_updates.git
+cd fetch_microsoft_updates
+
+# Search the pre-populated database
+python3 patch_manager.py search --classification "Security Updates"
+python3 patch_manager.py info  # View database statistics
+```
+
+### Download Latest Database Release
+
+```bash
+# Download from latest release
+curl -L -o windows_patches.db "https://github.com/Kishan9518/fetch_microsoft_updates/releases/latest/download/windows_patches.db"
+```
+
+📋 **See [CICD_PIPELINE.md](CICD_PIPELINE.md) for complete CI/CD documentation**
+
 ## Installation
 
 1. Clone the repository:

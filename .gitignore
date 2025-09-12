@@ -20,8 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
-# Database files
+# Database files (except the main windows patches database)
 *.db
+!windows_patches.db
 *.sqlite
 *.sqlite3
 
