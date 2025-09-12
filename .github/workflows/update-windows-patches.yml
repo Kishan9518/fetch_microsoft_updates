@@ -1,0 +1,178 @@
+name: Update Windows Patches Database
+
+on:
+  # Run daily at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      max_patches:
+        description: 'Maximum number of patches to fetch'
+        required: false
+        default: '2000'
+        type: string
+      method:
+        description: 'Discovery method'
+        required: false
+        default: 'recent'
+        type: choice
+        options:
+          - recent
+          - critical
+          - all
+
+env:
+  DATABASE_NAME: windows_patches.db
+
+jobs:
+  update-patches:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Check if database exists
+        id: check_db
+        run: |
+          if [ -f "$DATABASE_NAME" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Database exists, will update existing data"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Database does not exist, will create new one"
+          fi
+      
+      - name: Initialize database (if new)
+        if: steps.check_db.outputs.exists == 'false'
+        run: |
+          echo "Initializing new database..."
+          python patch_manager.py --db-path "$DATABASE_NAME" init
+      
+      - name: Get database stats before update
+        run: |
+          if [ -f "$DATABASE_NAME" ]; then
+            echo "=== Database stats before update ==="
+            python patch_manager.py --db-path "$DATABASE_NAME" info || echo "No existing data"
+          fi
+      
+      - name: Update patches database
+        run: |
+          echo "Fetching Windows patches..."
+          MAX_PATCHES="${{ github.event.inputs.max_patches || '2000' }}"
+          METHOD="${{ github.event.inputs.method || 'recent' }}"
+          
+          echo "Using method: $METHOD, max patches: $MAX_PATCHES"
+          
+          # Run the update with error handling
+          python patch_manager.py --db-path "$DATABASE_NAME" update \
+            --method "$METHOD" \
+            --max-patches "$MAX_PATCHES" || {
+              echo "Update failed, but continuing to check results..."
+              exit 0
+            }
+      
+      - name: Get database stats after update
+        run: |
+          echo "=== Database stats after update ==="
+          python patch_manager.py --db-path "$DATABASE_NAME" info
+          
+          echo "=== Database file info ==="
+          ls -lh "$DATABASE_NAME"
+          
+          echo "=== Recent patches ==="
+          python patch_manager.py --db-path "$DATABASE_NAME" search --limit 10 --format table || echo "No patches found"
+      
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [ -f "$DATABASE_NAME" ]; then
+            # Check if database file has changed or is new
+            if git diff --quiet HEAD -- "$DATABASE_NAME" 2>/dev/null; then
+              echo "changes=false" >> $GITHUB_OUTPUT
+              echo "No changes detected in database"
+            else
+              echo "changes=true" >> $GITHUB_OUTPUT
+              echo "Changes detected in database"
+            fi
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "Database file not found"
+          fi
+      
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Add the database file (override .gitignore for this specific file)
+          git add --force "$DATABASE_NAME"
+          
+          # Create commit with timestamp and stats
+          PATCH_COUNT=$(python patch_manager.py --db-path "$DATABASE_NAME" info | grep "Total patches:" | awk '{print $3}' || echo "unknown")
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          git commit -m "Update Windows patches database
+          
+          - Updated: $TIMESTAMP
+          - Total patches: $PATCH_COUNT
+          - Method: ${{ github.event.inputs.method || 'recent' }}
+          - Max patches requested: ${{ github.event.inputs.max_patches || '2000' }}
+          
+          [automated update]"
+          
+          # Push changes
+          git push
+      
+      - name: Upload database as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-patches-database
+          path: ${{ env.DATABASE_NAME }}
+          retention-days: 30
+      
+      - name: Create release (weekly)
+        if: steps.check_changes.outputs.changes == 'true' && github.event.schedule == '0 2 * * 0'
+        run: |
+          # Create a weekly release with the database
+          RELEASE_TAG="database-$(date +%Y%m%d)"
+          PATCH_COUNT=$(python patch_manager.py --db-path "$DATABASE_NAME" info | grep "Total patches:" | awk '{print $3}' || echo "unknown")
+          
+          gh release create "$RELEASE_TAG" \
+            --title "Windows Patches Database - $(date +%Y-%m-%d)" \
+            --notes "Automated weekly release of Windows patches database.
+            
+            **Statistics:**
+            - Total patches: $PATCH_COUNT
+            - Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            **Usage:**
+            \`\`\`bash
+            # Download and use the database
+            curl -L -o windows_patches.db \"https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/windows_patches.db\"
+            python patch_manager.py search --db-path windows_patches.db --classification \"Security Updates\"
+            \`\`\`" \
+            "$DATABASE_NAME"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
