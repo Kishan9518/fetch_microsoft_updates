@@ -769,12 +769,55 @@ if __name__ == '__main__':
     import sys
     import os
 
+    # Check for help first, before argument validation
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("Windows Patch Fetcher - Legacy Script")
+        print("=====================================")
+        print("")
+        print("This script fetches Windows patches by search term and saves to JSON.")
+        print("For the new database functionality, use patch_manager.py instead.")
+        print("")
+        print("Usage:")
+        print("  %s <search string> <file_path> [--save-to-db <db_path>]" % os.path.basename(sys.argv[0]))
+        print("")
+        print("Arguments:")
+        print("  search string    : KB number or search term")
+        print("  file_path       : Output JSON file path")
+        print("  --save-to-db    : Optional database file to also save patches")
+        print("")
+        print("Examples:")
+        print("  %s KB5043076 patches.json" % os.path.basename(sys.argv[0]))
+        print("  %s 'Cumulative Update' patches.json --save-to-db patches.db" % os.path.basename(sys.argv[0]))
+        print("")
+        print("New Database Features (use patch_manager.py):")
+        print("  - Systematic discovery of all Windows patches")
+        print("  - SQLite database storage for fast searching")
+        print("  - Bulk patch download and management")
+        print("  - Advanced search and filtering capabilities")
+        sys.exit(0)
+
     if len(sys.argv) < 3:
-        print("Usage: %s <search string> <file_path>" % os.path.basename(sys.argv[0]))
+        print("Usage: %s <search string> <file_path> [--save-to-db <db_path>]" % os.path.basename(sys.argv[0]))
+        print("       %s --help" % os.path.basename(sys.argv[0]))
+        print("")
+        print("For the new database functionality, use patch_manager.py instead:")
+        print("  python3 patch_manager.py --help")
         sys.exit(1)
 
     search = sys.argv[1] # "4530684"
     file_path = sys.argv[2] # "update_details.json"
+    
+    # Check for database save option
+    save_to_db = False
+    db_path = None
+    if len(sys.argv) > 3 and "--save-to-db" in sys.argv:
+        try:
+            db_index = sys.argv.index("--save-to-db")
+            if db_index + 1 < len(sys.argv):
+                db_path = sys.argv[db_index + 1]
+                save_to_db = True
+        except ValueError:
+            pass
 
     # validate that search string is not empty
     if not search:
@@ -791,6 +834,7 @@ if __name__ == '__main__':
     if not file_path:
         file_path = "update_details.json"
 
+    print(f"Searching for patches with term: {search}")
     updates = find_microsoft_catelogue_updates(search)
     if not updates:
         patch_links = get_patch_link(search)
@@ -808,7 +852,33 @@ if __name__ == '__main__':
             updates_json["updates"] = update_list
     else:
         updates_json["updates"] = updates
-            
+    
+    # Save to JSON file        
     with open(file_path, 'w') as outfile:
          json.dump(updates_json, outfile)
+    
+    print(f"Saved {len(updates_json['updates'])} patches to {file_path}")
+    
+    # Optionally save to database
+    if save_to_db and db_path:
+        try:
+            from patch_database import PatchDatabase
+            
+            # Initialize database if it doesn't exist
+            if not os.path.exists(db_path):
+                with PatchDatabase(db_path) as db:
+                    db.create_tables()
+                    print(f"Initialized new database: {db_path}")
+            
+            # Save patches to database
+            with PatchDatabase(db_path) as db:
+                added_count = db.insert_patches_bulk(updates_json["updates"])
+                print(f"Added {added_count} patches to database: {db_path}")
+                
+        except ImportError:
+            print("Database functionality not available. Install patch_database.py to use --save-to-db option.")
+        except Exception as e:
+            print(f"Failed to save to database: {e}")
+    
+    print("Done! For advanced database features, use: python3 patch_manager.py --help")
 
